@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
+import plotly.graph_objects as go
 import datetime
 import os
 
@@ -16,8 +15,6 @@ NUTRIENT_LABELS = [
     "鉄 (mg)", "ビタミンA (μg)", "ビタミンE (mg)", 
     "ビタミンB1 (mg)", "ビタミンB2 (mg)", "ビタミンC (mg)", "食塩相当量 (g)"
 ]
-
-plt.rcParams['font.family'] = ['MS Gothic', 'Hiragino Sans', 'TakaoPGothic', 'sans-serif']
 
 # --- 1. マスターデータベース ---
 INGREDIENTS_DB = {
@@ -98,7 +95,6 @@ def calculate_targets(gender, age, height, weight, activity):
         "ビタミンB2 (mg)": 1.6 if gender == "男性" else 1.2, "ビタミンC (mg)": 100, "食塩相当量 (g)": 7.5 if gender == "男性" else 6.5
     }
 
-# 明細から合計栄養素を計算するヘルパー関数
 def calculate_nutrients_from_details(df_details):
     totals = [0.0] * len(NUTRIENT_LABELS)
     for _, row in df_details.iterrows():
@@ -132,7 +128,7 @@ with tab1:
 
 user_targets = calculate_targets(g, a, h, w, ac)
 
-# --- TAB 2: 食事の記録 ---
+# --- TAB 2 ---
 with tab2:
     st.header("食事を新しく追加する")
     col_d, col_t = st.columns(2)
@@ -163,7 +159,7 @@ with tab2:
             df.to_csv(DIET_DETAIL_FILE, index=False)
             st.success("明細データを保存しました！")
 
-# --- TAB 3: 履歴・修正・シミュレーション ---
+# --- TAB 3 ---
 with tab3:
     st.header("履歴の管理と提案シミュレーション")
     if os.path.exists(DIET_DETAIL_FILE) and len(pd.read_csv(DIET_DETAIL_FILE)) > 0:
@@ -171,16 +167,12 @@ with tab3:
         unique_dates = sorted(df_history["Date"].unique(), reverse=True)
         view_date = st.selectbox("確認・修正したい日付", unique_dates)
         
-        # --- 🛠 登録データそのものの修正UI ---
         st.markdown("### 🛠 登録メニューの修正・削除")
         df_day = df_history[df_history["Date"] == view_date]
         selected_time = st.selectbox("食事のタイミングを選択", df_day["Timing"].unique())
         
-        # 該当する食事明細を抽出
         df_target_meal = df_day[df_day["Timing"] == selected_time]
-        
-        st.write("このタイミングに登録されているメニュー一覧（数量・倍率を直接編集可能）:")
-        # データエディタでメニュー名や数量を直接いじれるようにする
+        st.write("このタイミングに登録されているメニュー一覧:")
         edited_meal_df = st.data_editor(
             df_target_meal[["ItemName", "ItemType", "InputMode", "Amount"]], 
             hide_index=True, 
@@ -189,7 +181,6 @@ with tab3:
         
         col_btn1, col_btn2 = st.columns(2)
         if col_btn1.button("✍ 変更（数量など）を適用する", type="primary"):
-            # 一度該当タイミングを消して、編集後のデータを上書き結合
             df_history = df_history[~((df_history["Date"] == view_date) & (df_history["Timing"] == selected_time))]
             edited_meal_df["Date"] = view_date
             edited_meal_df["Timing"] = selected_time
@@ -206,15 +197,12 @@ with tab3:
             
         st.divider()
         
-        # 当日の最新合計値を計算
         df_day_latest = df_history[df_history["Date"] == view_date]
         day_totals = calculate_nutrients_from_details(df_day_latest)
         
-        # --- 💡 提案シミュレーション自動計算ロジック ---
         overs, unders = [], []
-        sim_totals = list(day_totals) # シミュレーション用のコピー
+        sim_totals = list(day_totals)
         
-        # 判定
         for i, label in enumerate(NUTRIENT_LABELS):
             consumed = day_totals[i]
             target = user_targets[label]
@@ -224,20 +212,16 @@ with tab3:
             else:
                 if pct < 70.0: unders.append(label)
                 
-        # シミュレーションへの数値反映
         sim_applied_msg = []
-        # ガッツリ飯をヘルシー和食へ代替シミュレーション
         if ("エネルギー (kcal)" in overs or "脂質 (g)" in overs) and any(x in df_day_latest["ItemName"].values for x in ["カレーライス", "かつ丼", "ハンバーグ定食", "から揚げ定食", "チキン南蛮定食", "とんこつラーメン"]):
             for idx, r in df_day_latest.iterrows():
                 if r["ItemName"] in ["カレーライス", "かつ丼", "ハンバーグ定食", "から揚げ定食", "チキン南蛮定食", "とんこつラーメン"]:
-                    # 元のメニューの栄養素を引いて、お刺身定食(1人前)を足す
                     old_item = r["ItemName"]
                     for i in range(len(NUTRIENT_LABELS)):
                         sim_totals[i] -= MEALS_DB[old_item][i] * float(r["Amount"])
                         sim_totals[i] += MEALS_DB["お刺身定食"][i]
                     sim_applied_msg.append(f"・過剰な脂質対策：重い主食『{old_item}』を『お刺身定食』へ置き換え")
                     break
-        # 不足分の自動追加シミュレーション
         if "たんぱく質 (g)" in unders:
             for i in range(len(NUTRIENT_LABELS)): sim_totals[i] += INGREDIENTS_DB["サラダチキン(100g)"][i]
             sim_applied_msg.append("・たんぱく質不足対策：『サラダチキン(100g)』を1品追加")
@@ -251,7 +235,6 @@ with tab3:
             sim_totals[14] = max(0.0, sim_totals[14] - 2.0)
             sim_applied_msg.append("・塩分過剰対策：ラーメンのスープ残し等で『塩分を2gカット』")
 
-        # グラフ用のデータフレーム作成
         comp_rows = []
         graph_colors = []
         for i, label in enumerate(NUTRIENT_LABELS):
@@ -260,40 +243,55 @@ with tab3:
             pct = round((c / t) * 100, 1) if t > 0 else 0.0
             sim_pct = round((sim_totals[i] / t) * 100, 1) if t > 0 else 0.0
             
-            # カラー判定
             if label in ["エネルギー (kcal)", "脂質 (g)", "飽和脂肪酸 (g)", "糖質 (g)", "食塩相当量 (g)"]:
-                color = "#ff4b4b" if pct > 110.0 else "#23c175" if pct >= 70.0 else "#66b3ff"
+                color = "#EF5350" if pct > 110.0 else "#66BB6A" if pct >= 70.0 else "#42A5F5"
             else:
-                color = "#23c175" if pct >= 100.0 else "#a3e4d7" if pct >= 70.0 else "#f1c40f"
+                color = "#66BB6A" if pct >= 100.0 else "#81C784" if pct >= 70.0 else "#FFCA28"
                 
             comp_rows.append({"栄養素": label, "現在摂取量": c, "目標値": t, "現在達成率(%)": pct, "提案反映後達成率(%)": sim_pct})
             graph_colors.append(color)
             
         df_comp = pd.DataFrame(comp_rows)
         
-        # --- 📊 2連並列グラフの描画 ---
         st.subheader(f"📅 {view_date} の栄養素比較（現在 vs 提案反映後）")
         
-        fig, ax = plt.subplots(figsize=(12, 8))
-        y = np.arange(len(NUTRIENT_LABELS))
-        width = 0.35  # 棒の幅
+        # --- 📊 Plotlyによる爆速日本語対応グループ化横棒グラフ ---
+        fig = go.Figure()
         
-        ax.axvline(100, color="gray", linestyle="--", alpha=0.7, label="目標100%ライン")
+        # 現在の食事（条件分岐カラーを1本ずつ反映）
+        fig.add_trace(go.Bar(
+            y=df_comp["栄養素"],
+            x=df_comp["現在達成率(%)"],
+            name="現在の食事",
+            orientation='h',
+            marker_color=graph_colors,
+            hovertemplate="栄養素: %{y}<br>現在達成率: %{x}%<extra></extra>"
+        ))
         
-        # 2本の棒をずらして並べる
-        bar1 = ax.barh(y - width/2, df_comp["現在達成率(%)"], width, label="現在の食事", color=graph_colors)
-        bar2 = ax.barh(y + width/2, df_comp["提案反映後達成率(%)"], width, label="AI提案を反映した場合", color="#f39c12", alpha=0.8)
+        # 提案反映後（オレンジ固定）
+        fig.add_trace(go.Bar(
+            y=df_comp["栄養素"],
+            x=df_comp["提案反映後達成率(%)"],
+            name="AI提案を反映した場合",
+            orientation='h',
+            marker_color="#FFA726",
+            hovertemplate="栄養素: %{y}<br>提案後達成率: %{x}%<extra></extra>"
+        ))
         
-        ax.set_yticks(y)
-        ax.set_yticklabels(df_comp["栄養素"], fontsize=10)
-        ax.set_xlabel("目標に対する割合 (%)")
-        ax.set_xlim(0, max(max(df_comp["現在達成率(%)"].max(), df_comp["提案反映後達成率(%)"].max()) + 20, 130))
-        ax.invert_yaxis()
-        ax.legend(loc="lower right")
+        # レイアウト調整
+        fig.update_layout(
+            barmode='group',
+            height=600,
+            margin=dict(l=20, r=20, t=20, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(title="目標に対する割合 (%)", range=[0, max(max(df_comp["現在達成率(%)"].max(), df_comp["提案反映後達成率(%)"].max()) + 20, 130)]),
+            yaxis=dict(autorange="reversed") # 上からエネルギー順にする
+        )
+        # 100%の目標ラインを引く
+        fig.add_vline(x=100, line_width=2, line_dash="dash", line_color="gray")
         
-        st.pyplot(fig)
+        st.plotly_chart(fig, use_container_width=True)
         
-        # AIアドバイス文面言及
         st.markdown("### 💡 AI栄養士からのアドバイスシミュレーション")
         if sim_applied_msg:
             st.info("上記のオレンジ色の棒は、以下の提案メニューを実際に適用・トレードした後の**『改善予測値』**です！")
