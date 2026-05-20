@@ -20,7 +20,7 @@ NUTRIENT_LABELS = [
 
 # --- ⚙️ 【プロ仕様】大容量マスターデータの自動生成・分離機能 ---
 # 最初のアプリアクセス時だけ、合計200個以上の大容量データをCSVとして作成します。
-def 🛠️_generate_default_masters():
+def generate_default_masters():
     if not os.path.exists(INGREDIENTS_FILE):
         # 食材マスター（約100個）
         ing_data = {
@@ -188,7 +188,7 @@ def 🛠️_generate_default_masters():
         pd.DataFrame.from_dict(meal_data, orient='index', columns=NUTRIENT_LABELS).to_csv(MEALS_FILE)
 
 # 初回のみ自動生成を実行
-🛠️_generate_default_masters()
+generate_default_masters()
 
 # --- 🚀 【プロ仕様】キャッシュ機能を使った爆速読み込み ---
 # これにより、データがいくら増えてもアプリ起動時以外はファイルを読み込まず超高速化します
